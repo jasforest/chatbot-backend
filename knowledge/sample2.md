@@ -1,0 +1,26 @@
+# Americans in the Middle East: For consular information or assistance, call the Department of State’s 24/7 Task Force at +1-202-501-4444 (from abroad) and 1-888-407-4747 (from the U.S. and Canada). View more.
+
+**Source:** travel_state_gov
+
+**URL:** https://travel.state.gov/content/travel/en/Intercountry-Adoption/Intercountry-Adoption-Country-Information.html
+
+Intercountry Adoption
+
+English
+
+Country Information
+
+To help you navigate the adoption process in a specific country, we explain if intercountry adoption between that country and the United States is possible, and if so, we offer detailed information about the adoption process.
+
+On each country specific information page, we provide the name and contact details of the country's adoption authority, describe the eligibility requirements for prospective adoptive parents to adopt and children to be adopted, and we include the adoption statistics as well.
+
+You can also find country-specific Adoption Alerts and Notices with important updates to the adoption process in that country.
+
+Learn more about specific countries’ adoption processes by using the “Learn about a country” search box.
+
+Latest News and Adoption Notices
+
+Contact us
+
+Read all adoption news and notices
+
