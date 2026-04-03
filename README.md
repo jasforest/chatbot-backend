@@ -123,7 +123,8 @@ Add `OPENAI_API_KEY` in Vercel **Environment Variables** and redeploy. The widge
 
 Optional tuning (Vercel env):
 
-- `MIN_RETRIEVAL_SCORE` (default `0.28`) — raise if matches feel loose; lower if you get too many refusals
+- `MIN_RETRIEVAL_SCORE` (default `0.22`) — raise if answers feel off-topic; lower if paraphrased questions get “no information” too often
+- `WEAK_RETRIEVAL_MIN` / `WEAK_RETRIEVAL_TOP_K` — when nothing passes the strict bar, the API can still use the best few chunks if their score is above the weak floor (helps paraphrases)
 - `RETRIEVAL_TOP_K` (default `6`)
 
 **Limits:** Very large knowledge bases produce a large JSON file and more CPU per request. If you outgrow this, move vectors to a hosted vector DB (e.g. Pinecone) later.

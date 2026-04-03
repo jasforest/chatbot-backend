@@ -9,10 +9,17 @@ const INDEX_PATH = path.join(process.cwd(), "knowledge", "embeddings.json");
 
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
-const TOP_K = Number(process.env.RETRIEVAL_TOP_K || process.env.PINECONE_TOP_K || 6);
+const TOP_K = Number(process.env.RETRIEVAL_TOP_K || process.env.PINECONE_TOP_K || 8);
+/** Chunks below this similarity are dropped (strict). Paraphrases often score ~0.2–0.35. */
 const MIN_SCORE = Number(
-  process.env.MIN_RETRIEVAL_SCORE ?? process.env.MIN_PINECONE_SCORE ?? 0.28
+  process.env.MIN_RETRIEVAL_SCORE ?? process.env.MIN_PINECONE_SCORE ?? 0.22
 );
+/**
+ * If nothing passes MIN_SCORE, still use the top few chunks when the best score is at least this.
+ * Stops “word for word” behavior without feeding noise when the query is totally unrelated.
+ */
+const WEAK_MIN = Number(process.env.WEAK_RETRIEVAL_MIN ?? 0.15);
+const WEAK_TOP_K = Number(process.env.WEAK_RETRIEVAL_TOP_K ?? 5);
 
 /** @type {{ embeddingModel?: string; chunks?: Array<{ id: string; text: string; embedding: number[]; metadata: { source_file: string; chunk_index: number } }> } | null} */
 let cachedIndex = null;
@@ -47,7 +54,16 @@ function searchLocal(queryVector, index) {
     },
   }));
   scored.sort((x, y) => y.score - x.score);
-  return scored.slice(0, TOP_K).filter((m) => m.score >= MIN_SCORE);
+
+  const strong = scored.slice(0, TOP_K).filter((m) => m.score >= MIN_SCORE);
+  if (strong.length > 0) return strong;
+
+  const best = scored[0]?.score ?? 0;
+  if (best < WEAK_MIN) return [];
+
+  return scored
+    .slice(0, WEAK_TOP_K)
+    .filter((m) => m.score >= WEAK_MIN);
 }
 
 function getLastUserMessage(messages) {
