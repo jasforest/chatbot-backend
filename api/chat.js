@@ -59,6 +59,44 @@ function getLastUserMessage(messages) {
   return "";
 }
 
+/**
+ * Small talk / meta questions — not answered from policy chunks.
+ * Returns null when the message should go through RAG.
+ */
+function conversationalReply(text) {
+  const t = text.trim();
+  if (!t) return null;
+
+  if (
+    /^(hi|hello|hey|hiya|good\s+(morning|afternoon|evening))([\s!.,?]|$|\s+(there|everyone|all))*\s*$/i.test(
+      t
+    ) &&
+    t.length < 80
+  ) {
+    return "Hello! I answer questions about government policy using our official policy documents. Ask me something specific from those policies when you're ready.";
+  }
+
+  if (
+    /what\s+(can|do)\s+you\s+(do|help)/i.test(t) ||
+    /^how\s+can\s+you\s+help/i.test(t) ||
+    /^who\s+are\s+you\??$/i.test(t) ||
+    /^what\s+is\s+this\??$/i.test(t) ||
+    /^help\s*$/i.test(t)
+  ) {
+    return "I only answer using the policy information in our database—not general knowledge. Ask about a specific policy, rule, eligibility, or process. If it isn't in our documents, I'll say I don't have that information.";
+  }
+
+  if (/^(thanks?|thank\s+you|thx|ty)[\s!.]*$/i.test(t)) {
+    return "You're welcome. Ask another policy question any time.";
+  }
+
+  if (/^(bye|goodbye|see\s+you)[\s!.]*$/i.test(t)) {
+    return "Goodbye. Come back if you have policy questions.";
+  }
+
+  return null;
+}
+
 async function openaiEmbedding(text) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
@@ -112,6 +150,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "No user message found" });
   }
 
+  const smallTalk = conversationalReply(userQuestion);
+  if (smallTalk) {
+    return res.status(200).json({ reply: smallTalk });
+  }
+
   let index;
   try {
     index = loadIndex();
@@ -150,14 +193,13 @@ export default async function handler(req, res) {
 Rules:
 - Use only information that is explicitly stated in the Context. Do not use outside knowledge.
 - Do not suggest, recommend, infer, or add information that is not directly supported by the Context.
-
 - If the Context does not contain enough information to answer the question, reply with exactly this sentence and nothing else: ${FALLBACK}
 - Keep answers concise and factual. If you cite details, they must appear in the Context.
 - Do not mention "Context" or chunk numbers unless the user explicitly asks how the system works.
-- When answering, always end with: "Source: [url]" using the URL provided in the context metadata.
-- If the user sends a greeting (e.g. "hello", "hi"), respond politely and ask how you can help with government policy questions. Do not apply the fallback message for greetings.
-- If the user asks about something unrelated to government policy, politely let them know you can only assist with government policy questions.
-- If the user asks about current status of a policy, only state what is written in the Context. Do not speculate about whether information is still current or has changed.
+- If the context text includes a source URL, you may mention it. Do not invent URLs.
+- If the user asks whether a policy is still current or may have changed, only repeat what the Context says; do not speculate.
+
+Context:
 ${context}`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
