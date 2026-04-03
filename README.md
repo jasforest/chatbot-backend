@@ -96,6 +96,40 @@ res.setHeader("Access-Control-Allow-Origin", "https://yoursite.com");
 
 ---
 
+## Government policy mode (OpenAI embeddings + local search)
+
+The chat API answers **only** from policy text you ingest from `knowledge/*.md` into `knowledge/embeddings.json`. At request time it embeds the user question, scores every chunk with **cosine similarity**, and asks the model to answer only from the top matches. If nothing passes the score threshold, it replies: `I don't have information on that.`
+
+You need **only** `OPENAI_API_KEY` (no Pinecone).
+
+### 1. Put policy text in Markdown
+
+Add one or more `.md` files under `knowledge/`.
+
+### 2. Build the index (local)
+
+```bash
+npm install
+cp .env.example .env
+# Set OPENAI_API_KEY
+npm run ingest
+```
+
+This writes `knowledge/embeddings.json`. **Commit that file** (or generate it in CI before deploy) so Vercel can read it.
+
+### 3. Deploy
+
+Add `OPENAI_API_KEY` in Vercel **Environment Variables** and redeploy. The widget does not need changes.
+
+Optional tuning (Vercel env):
+
+- `MIN_RETRIEVAL_SCORE` (default `0.28`) — raise if matches feel loose; lower if you get too many refusals
+- `RETRIEVAL_TOP_K` (default `6`)
+
+**Limits:** Very large knowledge bases produce a large JSON file and more CPU per request. If you outgrow this, move vectors to a hosted vector DB (e.g. Pinecone) later.
+
+---
+
 ## Cost Estimate
 
 Using `gpt-4o-mini`:

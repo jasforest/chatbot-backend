@@ -1,0 +1,11 @@
+{
+  "name": "chatbot-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ingest": "node scripts/ingest-markdown.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
