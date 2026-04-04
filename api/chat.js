@@ -20,6 +20,87 @@ const MIN_SCORE = Number(
  */
 const WEAK_MIN = Number(process.env.WEAK_RETRIEVAL_MIN ?? 0.15);
 const WEAK_TOP_K = Number(process.env.WEAK_RETRIEVAL_TOP_K ?? 5);
+/** Added to cosine so word overlap (e.g. visa, immigration) can reorder chunks when embeddings tie. */
+const KEYWORD_BOOST = Number(process.env.RETRIEVAL_KEYWORD_BOOST ?? 0.08);
+
+const STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "can",
+  "her",
+  "was",
+  "one",
+  "our",
+  "had",
+  "how",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "this",
+  "that",
+  "these",
+  "those",
+  "with",
+  "from",
+  "have",
+  "has",
+  "had",
+  "does",
+  "did",
+  "will",
+  "into",
+  "than",
+  "then",
+  "them",
+  "they",
+  "your",
+  "any",
+  "some",
+  "such",
+  "only",
+  "same",
+  "each",
+  "both",
+  "few",
+  "more",
+  "most",
+  "other",
+  "about",
+  "after",
+  "also",
+  "being",
+  "been",
+  "here",
+  "there",
+]);
+
+function queryKeywordsForOverlap(q) {
+  return q
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+}
+
+/** 0..1 fraction of query keywords that appear in chunk text */
+function lexicalOverlapRatio(queryText, chunkText) {
+  const keys = queryKeywordsForOverlap(queryText);
+  if (keys.length === 0) return 0;
+  const hay = chunkText.toLowerCase();
+  let hits = 0;
+  for (const k of keys) {
+    if (hay.includes(k)) hits++;
+  }
+  return hits / keys.length;
+}
 
 /** @type {{ embeddingModel?: string; chunks?: Array<{ id: string; text: string; embedding: number[]; metadata: { source_file: string; chunk_index: number } }> } | null} */
 let cachedIndex = null;
@@ -44,26 +125,40 @@ function cosineSimilarity(a, b) {
   return denom === 0 ? 0 : dot / denom;
 }
 
-function searchLocal(queryVector, index) {
+function searchLocal(queryVector, index, queryText) {
   const list = index.chunks || [];
-  const scored = list.map((c) => ({
-    score: cosineSimilarity(queryVector, c.embedding),
-    metadata: {
-      text: c.text,
-      source_file: c.metadata?.source_file || "policy",
-    },
-  }));
-  scored.sort((x, y) => y.score - x.score);
+  const scored = list.map((c) => {
+    const cosine = cosineSimilarity(queryVector, c.embedding);
+    const lex = lexicalOverlapRatio(queryText, c.text);
+    const combined = cosine + KEYWORD_BOOST * lex;
+    return {
+      cosine,
+      lex,
+      combined,
+      metadata: {
+        text: c.text,
+        source_file: c.metadata?.source_file || "policy",
+      },
+    };
+  });
 
-  const strong = scored.slice(0, TOP_K).filter((m) => m.score >= MIN_SCORE);
-  if (strong.length > 0) return strong;
+  const passesStrict = (m) =>
+    m.cosine >= MIN_SCORE ||
+    (m.cosine >= MIN_SCORE - 0.06 && m.lex >= 0.25);
 
-  const best = scored[0]?.score ?? 0;
-  if (best < WEAK_MIN) return [];
+  const candidates = scored.filter(passesStrict);
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.combined - a.combined);
+    return candidates.slice(0, TOP_K);
+  }
+
+  scored.sort((a, b) => b.cosine - a.cosine);
+  const bestCosine = scored[0]?.cosine ?? 0;
+  if (bestCosine < WEAK_MIN) return [];
 
   return scored
     .slice(0, WEAK_TOP_K)
-    .filter((m) => m.score >= WEAK_MIN);
+    .filter((m) => m.cosine >= WEAK_MIN);
 }
 
 function getLastUserMessage(messages) {
@@ -73,6 +168,40 @@ function getLastUserMessage(messages) {
     }
   }
   return "";
+}
+
+/** Collect recent user turns for embedding (follow-ups like "what about fees?" need prior topic). */
+function getUserTurns(messages, maxTurns = 4) {
+  const out = [];
+  for (let i = messages.length - 1; i >= 0 && out.length < maxTurns; i--) {
+    if (messages[i]?.role === "user" && typeof messages[i]?.content === "string") {
+      out.unshift(messages[i].content.trim());
+    }
+  }
+  return out;
+}
+
+const FOLLOWUP_HINT =
+  /\b(that|those|this|these|it|same|also|more|above|earlier|before|you said|your (last|previous)|follow[- ]?up|and what about|how about)\b/i;
+
+/**
+ * Single string for vector search — combines recent user questions when the latest is short or refers back.
+ */
+function buildRetrievalQuery(messages) {
+  const last = getLastUserMessage(messages);
+  if (!last) return "";
+  const turns = getUserTurns(messages, 4);
+  if (turns.length <= 1) return last.slice(0, 8000);
+
+  const needsContext =
+    last.length < 55 ||
+    FOLLOWUP_HINT.test(last) ||
+    /^(what|how|why|when|where|who|is|are|can|do|does)\s+(about|else|that|this)\b/i.test(last.trim());
+
+  if (!needsContext) return last.slice(0, 8000);
+
+  const combined = turns.join("\n\n");
+  return combined.slice(-8000);
 }
 
 /**
@@ -192,8 +321,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const queryVector = await openaiEmbedding(userQuestion);
-    const matches = searchLocal(queryVector, index);
+    const retrievalQuery = buildRetrievalQuery(messages);
+    const queryVector = await openaiEmbedding(retrievalQuery || userQuestion);
+    const matches = searchLocal(queryVector, index, retrievalQuery || userQuestion);
 
     if (matches.length === 0) {
       return res.status(200).json({ reply: FALLBACK });
@@ -207,9 +337,11 @@ export default async function handler(req, res) {
     const systemPrompt = `You are a government policy assistant. Your answers must be based ONLY on the policy excerpts in "Context" below.
 
 Rules:
+- Use the conversation history only to understand follow-up questions (e.g. what "that" or "it" refers to). Do not treat earlier assistant messages as a source of policy facts—only the Context below may be cited for policies.
 - Use only information that is explicitly stated in the Context. Do not use outside knowledge.
 - Do not suggest, recommend, infer, or add information that is not directly supported by the Context.
-- If the Context does not contain enough information to answer the question, reply with exactly this sentence and nothing else: ${FALLBACK}
+- If the Context does not contain information that reasonably relates to the question, reply with exactly this sentence and nothing else: ${FALLBACK}
+- If the Context states relevant requirements, steps, or criteria (even if not a perfect checklist), summarize only what is stated there.
 - Keep answers concise and factual. If you cite details, they must appear in the Context.
 - Do not mention "Context" or chunk numbers unless the user explicitly asks how the system works.
 - If the context text includes a source URL, you may mention it. Do not invent URLs.

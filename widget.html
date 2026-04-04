@@ -253,11 +253,48 @@
 <script>
   // ── CONFIG ──────────────────────────────────────────────
   const API_URL = "https://chatbot-backend-wheat-delta.vercel.app/api/chat"; // 👈 Replace after deploying to Vercel
+  const CHAT_HISTORY_KEY = "chatbot_message_history_v1";
+  const MAX_STORED_MESSAGES = 40;
   // ────────────────────────────────────────────────────────
 
   let isOpen = false;
   let isLoading = false;
   let messageHistory = [];
+
+  function persistMessageHistory() {
+    try {
+      const trimmed = messageHistory.slice(-MAX_STORED_MESSAGES);
+      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(trimmed));
+    } catch (e) {}
+  }
+
+  function renderHistoryFromStorage() {
+    try {
+      const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      messageHistory = parsed;
+      const box = document.getElementById("chat-messages");
+      box.innerHTML = "";
+      parsed.forEach(function (m) {
+        if (m.role === "user") {
+          const el = document.createElement("div");
+          el.className = "msg user";
+          el.textContent = m.content;
+          box.appendChild(el);
+        } else if (m.role === "assistant") {
+          const el = document.createElement("div");
+          el.className = "msg bot";
+          el.textContent = m.content;
+          box.appendChild(el);
+        }
+      });
+      scrollToBottom();
+    } catch (e) {}
+  }
+
+  document.addEventListener("DOMContentLoaded", renderHistoryFromStorage);
 
   function toggleChat() {
     isOpen = !isOpen;
@@ -330,6 +367,7 @@
       if (data.reply) {
         addBotMessage(data.reply);
         messageHistory.push({ role: "assistant", content: data.reply });
+        persistMessageHistory();
       } else {
         addBotMessage("Sorry, something went wrong. Please try again.");
       }
