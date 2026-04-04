@@ -63,6 +63,14 @@ function slugify(s) {
     .slice(0, 48) || "doc";
 }
 
+/** Pull **URL:** line (or first http(s) URL) so every chunk carries the official link even if chunk text omits it. */
+function extractSourceUrl(markdown) {
+  const labeled = markdown.match(/\*\*URL:\*\*\s*(https?:\/\/[^\s<*>\[\]"]+)/i);
+  if (labeled) return labeled[1].trim();
+  const loose = markdown.match(/https?:\/\/[^\s<*>\[\]"]{12,}/);
+  return loose ? loose[0].trim().replace(/[),.;]+$/, "") : "";
+}
+
 async function main() {
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is required");
 
@@ -84,6 +92,7 @@ async function main() {
     const fullPath = path.join(KNOWLEDGE_DIR, file);
     const raw = await fs.readFile(fullPath, "utf8");
     const baseId = slugify(path.basename(file, ".md"));
+    const sourceUrl = extractSourceUrl(raw);
     const parts = chunkText(raw, CHUNK_SIZE, CHUNK_OVERLAP);
 
     for (let i = 0; i < parts.length; i++) {
@@ -96,6 +105,7 @@ async function main() {
         metadata: {
           source_file: file,
           chunk_index: i,
+          ...(sourceUrl ? { source_url: sourceUrl } : {}),
         },
       });
     }

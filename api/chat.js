@@ -138,6 +138,7 @@ function searchLocal(queryVector, index, queryText) {
       metadata: {
         text: c.text,
         source_file: c.metadata?.source_file || "policy",
+        source_url: c.metadata?.source_url,
       },
     };
   });
@@ -196,6 +197,7 @@ function buildRetrievalQuery(messages) {
   const needsContext =
     last.length < 55 ||
     FOLLOWUP_HINT.test(last) ||
+    /\b(url|link|links|source|website|reference)\b/i.test(last) ||
     /^(what|how|why|when|where|who|is|are|can|do|does)\s+(about|else|that|this)\b/i.test(last.trim());
 
   if (!needsContext) return last.slice(0, 8000);
@@ -261,12 +263,19 @@ async function openaiEmbedding(text) {
 
 function buildContext(matches) {
   const parts = [];
+  const seenUrls = new Set();
   let i = 1;
   for (const m of matches) {
     const text = m.metadata?.text;
     if (typeof text !== "string" || !text.trim()) continue;
     const src = m.metadata?.source_file || "policy";
-    parts.push(`[${i}] (source: ${src})\n${text.trim()}`);
+    const url = m.metadata?.source_url;
+    let urlLine = "";
+    if (typeof url === "string" && url.startsWith("http") && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      urlLine = `\nOfficial source URL (for this document): ${url}`;
+    }
+    parts.push(`[${i}] (source file: ${src})${urlLine}\n${text.trim()}`);
     i++;
   }
   return parts.join("\n\n---\n\n");
@@ -344,7 +353,7 @@ Rules:
 - If the Context states relevant requirements, steps, or criteria (even if not a perfect checklist), summarize only what is stated there.
 - Keep answers concise and factual. If you cite details, they must appear in the Context.
 - Do not mention "Context" or chunk numbers unless the user explicitly asks how the system works.
-- If the context text includes a source URL, you may mention it. Do not invent URLs.
+- When "Official source URL" appears above a chunk, you may repeat that exact URL when the user asks for a link or source. Do not invent URLs that are not shown in the Context.
 - If the user asks whether a policy is still current or may have changed, only repeat what the Context says; do not speculate.
 
 Context:
